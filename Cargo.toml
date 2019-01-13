@@ -1,23 +1,16 @@
 [package]
-name = "dynarray"
+name = "rearray"
 version = "0.0.0"
+edition = "2018"
 authors = ["Peter Jin <peterhaijin@gmail.com>"]
-
-[lib]
-name = "dynarray"
-path = "src/lib.rs"
 
 [features]
 default = []
-f16 = ["float", "memrepr/f16"]
-gpu = []
+f16 = ["half", "memrepr/f16"]
 mklml = ["mklml_ffi"]
-
-#[build-dependencies]
-#bindgen = "*"
 
 [dependencies]
 arrayidx = { path = "../arrayidx" }
-float = { version = "*", optional = true }
+half = { version = "^1.3", optional = true }
 memrepr = { path = "../memrepr" }
 mklml_ffi = { path = "../mklml_ffi", optional = true }
