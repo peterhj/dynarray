@@ -1,6 +1,7 @@
 use crate::*;
 
-#[cfg(feature = "mklml")] use mklml_ffi::cblas::*;
+#[cfg(feature = "mklml")]
+use mklml_sys::cblas::*;
 
 #[inline]
 fn sz2int(sz: usize) -> i32 {
@@ -19,9 +20,9 @@ impl VectorInPlaceOps<f32> for Rearray<f32> {
     assert_eq!(a.size()[0], self.size()[0]);
     assert_eq!(a.size()[1], x.size()[0]);
     assert_eq!(a.stride()[0], 1);
-    let a = a.borrow();
-    let x = x.borrow();
-    let y = self.borrow_mut();
+    let a = a.view();
+    let x = x.view();
+    let y = self.view_mut();
     unsafe { cblas_sgemv(
         CBLAS_LAYOUT_CblasColMajor,
         CBLAS_TRANSPOSE_CblasNoTrans,
@@ -39,9 +40,9 @@ impl VectorInPlaceOps<f32> for Rearray<f32> {
     assert_eq!(a.size()[0], x.size()[0]);
     assert_eq!(a.size()[1], self.size()[0]);
     assert_eq!(a.stride()[0], 1);
-    let a = a.borrow();
-    let x = x.borrow();
-    let y = self.borrow_mut();
+    let a = a.view();
+    let x = x.view();
+    let y = self.view_mut();
     unsafe { cblas_sgemv(
         CBLAS_LAYOUT_CblasColMajor,
         CBLAS_TRANSPOSE_CblasTrans,
@@ -62,9 +63,9 @@ impl VectorInPlaceOps<f64> for Rearray<f64> {
     assert_eq!(a.size()[0], self.size()[0]);
     assert_eq!(a.size()[1], x.size()[0]);
     assert_eq!(a.stride()[0], 1);
-    let a = a.borrow();
-    let x = x.borrow();
-    let y = self.borrow_mut();
+    let a = a.view();
+    let x = x.view();
+    let y = self.view_mut();
     unsafe { cblas_dgemv(
         CBLAS_LAYOUT_CblasColMajor,
         CBLAS_TRANSPOSE_CblasNoTrans,
@@ -82,9 +83,9 @@ impl VectorInPlaceOps<f64> for Rearray<f64> {
     assert_eq!(a.size()[0], x.size()[0]);
     assert_eq!(a.size()[1], self.size()[0]);
     assert_eq!(a.stride()[0], 1);
-    let a = a.borrow();
-    let x = x.borrow();
-    let y = self.borrow_mut();
+    let a = a.view();
+    let x = x.view();
+    let y = self.view_mut();
     unsafe { cblas_dgemv(
         CBLAS_LAYOUT_CblasColMajor,
         CBLAS_TRANSPOSE_CblasTrans,
@@ -108,21 +109,23 @@ pub trait MatrixInPlaceOps<T: Copy + 'static> {
 #[cfg(feature = "mklml")]
 impl MatrixInPlaceOps<f32> for Rearray<f32> {
   fn matrix_mult(&mut self, alpha: f32, a: Rearray<f32>, b: Rearray<f32>, beta: f32) {
-    assert_eq!(a.size()[0], self.size()[0]);
+    let nrows = self.size()[0];
+    let ncols = self.size()[1];
+    assert_eq!(a.size()[0], nrows);
     assert_eq!(a.size()[1], b.size()[0]);
-    assert_eq!(b.size()[1], self.size()[1]);
+    assert_eq!(b.size()[1], ncols);
     assert_eq!(a.stride()[0], 1);
     assert_eq!(b.stride()[0], 1);
     assert_eq!(self.stride()[0], 1);
-    let a = a.borrow();
-    let b = b.borrow();
-    let y = self.borrow_mut();
+    let a = a.view();
+    let b = b.view();
+    let y = self.view_mut();
     unsafe { cblas_sgemm(
         CBLAS_LAYOUT_CblasColMajor,
         CBLAS_TRANSPOSE_CblasNoTrans,
         CBLAS_TRANSPOSE_CblasNoTrans,
-        sz2int(self.size()[0]),
-        sz2int(self.size()[1]),
+        sz2int(nrows),
+        sz2int(ncols),
         sz2int(a.size()[1]),
         alpha,
         a.as_ptr(), sz2int(a.stride()[1]),
@@ -144,21 +147,23 @@ impl MatrixInPlaceOps<f32> for Rearray<f32> {
 #[cfg(feature = "mklml")]
 impl MatrixInPlaceOps<f64> for Rearray<f64> {
   fn matrix_mult(&mut self, alpha: f64, a: Rearray<f64>, b: Rearray<f64>, beta: f64) {
-    assert_eq!(a.size()[0], self.size()[0]);
+    let nrows = self.size()[0];
+    let ncols = self.size()[1];
+    assert_eq!(a.size()[0], nrows);
     assert_eq!(a.size()[1], b.size()[0]);
-    assert_eq!(b.size()[1], self.size()[1]);
+    assert_eq!(b.size()[1], ncols);
     assert_eq!(a.stride()[0], 1);
     assert_eq!(b.stride()[0], 1);
     assert_eq!(self.stride()[0], 1);
-    let a = a.borrow();
-    let b = b.borrow();
-    let y = self.borrow_mut();
+    let a = a.view();
+    let b = b.view();
+    let y = self.view_mut();
     unsafe { cblas_dgemm(
         CBLAS_LAYOUT_CblasColMajor,
         CBLAS_TRANSPOSE_CblasNoTrans,
         CBLAS_TRANSPOSE_CblasNoTrans,
-        sz2int(self.size()[0]),
-        sz2int(self.size()[1]),
+        sz2int(nrows),
+        sz2int(ncols),
         sz2int(a.size()[1]),
         alpha,
         a.as_ptr(), sz2int(a.stride()[1]),

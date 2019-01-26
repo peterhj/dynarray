@@ -1,90 +1,231 @@
 extern crate arrayidx;
-extern crate memrepr;
-#[cfg(feature = "mklml")] extern crate mklml_ffi;
+#[cfg(feature = "mklml")]
+extern crate mklml_sys;
+extern crate podmem;
 
 use arrayidx::{IndexNd};
-use memrepr::*;
+use podmem::{PodRegion, PodRegionMut, ZeroBits};
+use podmem::heap::{HeapMem};
 
-use std::cell::{RefCell, Ref, RefMut};
+use std::cell::{RefCell, Ref};
 use std::rc::{Rc};
 
 pub mod linalg;
 
 #[derive(Clone)]
-pub struct Rearray<T> where T: Copy + 'static {
+enum RearrayRepr<T: Copy + 'static> {
+  Dense(Rc<DenseRearrayRepr<T>>),
+  Mini(IndexNd, MiniRearrayRepr<T>),
+}
+
+impl<T> RearrayRepr<T> where T: Copy + 'static {
+  fn size(&self) -> &IndexNd {
+    match self {
+      &RearrayRepr::Dense(ref dense) => &dense.size,
+      &RearrayRepr::Mini(ref size, _) => size,
+    }
+  }
+
+  fn stride(&self) -> IndexNd {
+    match self {
+      &RearrayRepr::Dense(ref dense) => dense.stride.clone(),
+      &RearrayRepr::Mini(ref size, _) => size.to_packed_stride(),
+    }
+  }
+
+  fn is_packed(&self) -> bool {
+    match self {
+      &RearrayRepr::Dense(ref dense) => {
+        dense.size.is_packed(&dense.stride) && dense.offset.is_zero()
+      }
+      &RearrayRepr::Mini(..) => true,
+    }
+  }
+}
+
+impl<T> RearrayRepr<T> where T: ZeroBits + 'static {
+  fn densify(&mut self) {
+    match self {
+      &mut RearrayRepr::Dense(_) => {}
+      &mut RearrayRepr::Mini(ref size, ref mini) => {
+        let new_dense = match mini {
+          &MiniRearrayRepr::Zeros => {
+            DenseRearrayRepr::zeros(size.clone())
+          }
+          &MiniRearrayRepr::Constants(_c) => {
+            // TODO
+            // FIXME: fill with `c`.
+            //let mut new_dense = unsafe { DenseRearrayRepr::<T>::alloc(size.clone()) };
+            unimplemented!();
+          }
+        };
+        *self = RearrayRepr::Dense(Rc::new(new_dense));
+      }
+    }
+  }
+}
+
+pub struct DenseRearrayRepr<T: Copy + 'static> {
   size:     IndexNd,
   offset:   IndexNd,
   stride:   IndexNd,
-  memcopy:  Rc<RefCell<HeapMem<T>>>,
+  mem:      HeapMem<T>,
 }
 
-impl<T> Rearray<T> where T: ZeroBits {
-  pub fn zeros(size: IndexNd) -> Rearray<T> {
+impl<T> Clone for DenseRearrayRepr<T> where T: Copy + 'static {
+  fn clone(&self) -> DenseRearrayRepr<T> {
+    // FIXME: preserve layout.
+    let mut new_mem = unsafe { HeapMem::alloc(self.size.flat_len()) };
+    new_mem.as_slice_mut().copy_from_slice(self.mem.as_slice());
+    let offset = IndexNd::zero(self.size.dim());
+    let stride = self.size.to_packed_stride();
+    DenseRearrayRepr{
+      size: self.size.clone(),
+      offset,
+      stride,
+      mem:  new_mem,
+    }
+  }
+}
+
+impl<T> DenseRearrayRepr<T> where T: ZeroBits + 'static {
+  pub fn zeros(size: IndexNd) -> DenseRearrayRepr<T> {
     let mem = HeapMem::zeros(size.flat_len());
     let offset = IndexNd::zero(size.dim());
     let stride = size.to_packed_stride();
-    Rearray{
+    DenseRearrayRepr{
       size,
       offset,
       stride,
-      memcopy:  Rc::new(RefCell::new(mem)),
+      mem,
+    }
+  }
+}
+
+impl<T> DenseRearrayRepr<T> where T: Copy + 'static {
+  pub unsafe fn alloc(size: IndexNd) -> DenseRearrayRepr<T> {
+    let mem = HeapMem::alloc(size.flat_len());
+    let offset = IndexNd::zero(size.dim());
+    let stride = size.to_packed_stride();
+    DenseRearrayRepr{
+      size,
+      offset,
+      stride,
+      mem,
+    }
+  }
+
+  pub fn copy_from(&mut self, src: &DenseRearrayRepr<T>) {
+    self.mem.as_slice_mut().copy_from_slice(src.mem.as_slice());
+  }
+}
+
+#[derive(Clone, Copy)]
+pub enum MiniRearrayRepr<T: Copy + 'static> {
+  Zeros,
+  Constants(T),
+}
+
+pub struct Rearray<T: Copy + 'static> {
+  repr: RefCell<RearrayRepr<T>>,
+}
+
+impl<T> Clone for Rearray<T> where T: Copy + 'static {
+  fn clone(&self) -> Rearray<T> {
+    let repr = self.repr.try_borrow().unwrap_or_else(|_| panic!("bug"));
+    Rearray{
+      repr: RefCell::new(repr.clone()),
     }
   }
 }
 
 impl<T> Rearray<T> where T: Copy + 'static {
-  pub fn size(&self) -> &IndexNd {
-    &self.size
+  pub fn zeros(size: IndexNd) -> Rearray<T> {
+    Rearray{
+      repr: RefCell::new(RearrayRepr::Mini(size, MiniRearrayRepr::Zeros)),
+    }
   }
 
-  pub fn stride(&self) -> &IndexNd {
-    &self.stride
+  pub fn size(&self) -> IndexNd {
+    let repr = self.repr.try_borrow().unwrap_or_else(|_| panic!("bug"));
+    repr.size().clone()
+  }
+
+  pub fn stride(&self) -> IndexNd {
+    let repr = self.repr.try_borrow().unwrap_or_else(|_| panic!("bug"));
+    repr.stride()
   }
 
   pub fn is_packed(&self) -> bool {
-    self.size.is_packed(&self.stride) && self.offset.is_zero()
+    let repr = self.repr.try_borrow().unwrap_or_else(|_| panic!("bug"));
+    repr.is_packed()
   }
+}
 
-  pub fn shaped(&self, new_size: IndexNd) -> Rearray<T> {
-    assert!(self.is_packed());
-    assert_eq!(new_size.flat_len(), self.size.flat_len());
-    let new_offset = IndexNd::zero(new_size.dim());
-    let new_stride = new_size.to_packed_stride();
-    Rearray{
-      size:     new_size,
-      offset:   new_offset,
-      stride:   new_stride,
-      memcopy:  self.memcopy.clone(),
+impl<T> Rearray<T> where T: ZeroBits + 'static {
+  pub fn view<'a>(&'a self) -> RearrayView<'a, T> {
+    let is_dense_orig = {
+      let repr = self.repr.try_borrow().unwrap_or_else(|_| panic!("bug"));
+      match &*repr {
+        &RearrayRepr::Dense(_) => true,
+        _ => false,
+      }
+    };
+    if !is_dense_orig {
+      let mut repr = self.repr.try_borrow_mut().unwrap_or_else(|_| panic!("bug"));
+      repr.densify();
+    }
+    let repr = self.repr.try_borrow().unwrap_or_else(|_| panic!("bug"));
+    let (size, offset, stride) = match &*repr {
+      &RearrayRepr::Dense(ref dense) => {
+        let size = dense.size.clone();
+        let offset = dense.offset.clone();
+        let stride = dense.stride.clone();
+        (size, offset, stride)
+      }
+      _ => unreachable!(),
+    };
+    let mem = Ref::map(repr, |repr| match repr {
+      &RearrayRepr::Dense(ref dense) => &dense.mem,
+      _ => unreachable!(),
+    });
+    RearrayView{
+      size,
+      offset,
+      stride,
+      mem,
     }
   }
 
-  pub fn borrow<'a>(&'a self) -> RearrayRef<'a, T> {
-    RearrayRef{
-      size:     self.size.clone(),
-      offset:   self.offset.clone(),
-      stride:   self.stride.clone(),
-      memcopy:  self.memcopy.borrow(),
-    }
-  }
-
-  pub fn borrow_mut<'a>(&'a self) -> RearrayRefMut<'a, T> {
-    RearrayRefMut{
-      size:     self.size.clone(),
-      offset:   self.offset.clone(),
-      stride:   self.stride.clone(),
-      memcopy:  self.memcopy.borrow_mut(),
+  pub fn view_mut<'a>(&'a mut self) -> RearrayViewMut<'a, T> {
+    let repr = self.repr.get_mut();
+    repr.densify();
+    match repr {
+      &mut RearrayRepr::Dense(ref mut dense) => {
+        let size = dense.size.clone();
+        let offset = dense.offset.clone();
+        let stride = dense.stride.clone();
+        let owned_dense = Rc::make_mut(dense);
+        RearrayViewMut{
+          size,
+          offset,
+          stride,
+          mem:  &mut owned_dense.mem,
+        }
+      }
+      _ => unimplemented!(),
     }
   }
 }
 
-pub struct RearrayRef<'a, T> where T: Copy + 'static {
+pub struct RearrayView<'a, T> where T: Copy + 'static {
   size:     IndexNd,
   offset:   IndexNd,
   stride:   IndexNd,
-  memcopy:  Ref<'a, HeapMem<T>>,
+  mem:      Ref<'a, HeapMem<T>>,
 }
 
-impl<'a, T> RearrayRef<'a, T> where T: Copy + 'static {
+impl<'a, T> RearrayView<'a, T> where T: Copy + 'static {
   pub fn flat_size(&self) -> usize {
     self.size.flat_len()
   }
@@ -102,18 +243,18 @@ impl<'a, T> RearrayRef<'a, T> where T: Copy + 'static {
   }
 
   pub fn as_ptr(&self) -> *const T {
-    self.memcopy.as_ptr()
+    (&*self.mem).as_ptr()
   }
 }
 
-pub struct RearrayRefMut<'a, T> where T: Copy + 'static {
+pub struct RearrayViewMut<'a, T> where T: Copy + 'static {
   size:     IndexNd,
   offset:   IndexNd,
   stride:   IndexNd,
-  memcopy:  RefMut<'a, HeapMem<T>>,
+  mem:      &'a mut HeapMem<T>,
 }
 
-impl<'a, T> RearrayRefMut<'a, T> where T: Copy + 'static {
+impl<'a, T> RearrayViewMut<'a, T> where T: Copy + 'static {
   pub fn flat_size(&self) -> usize {
     self.size.flat_len()
   }
@@ -131,17 +272,6 @@ impl<'a, T> RearrayRefMut<'a, T> where T: Copy + 'static {
   }
 
   pub fn as_ptr_mut(&self) -> *mut T {
-    self.memcopy.as_ptr_mut()
-  }
-
-  pub fn flat_map_mut<F: FnMut(&mut T)>(&mut self, mut func: F) {
-    if self.is_packed() {
-      let flen = self.flat_size();
-      for x in self.memcopy.as_slice_mut().iter_mut().take(flen) {
-        func(x);
-      }
-    } else {
-      unimplemented!();
-    }
+    (&*self.mem).as_ptr_mut()
   }
 }
