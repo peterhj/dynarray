@@ -20,9 +20,9 @@ impl VectorInPlaceOps<f32> for Rearray<f32> {
     assert_eq!(a.size()[0], self.size()[0]);
     assert_eq!(a.size()[1], x.size()[0]);
     assert_eq!(a.stride()[0], 1);
-    let a = a.view();
-    let x = x.view();
-    let y = self.view_mut();
+    let a = a.dense_view();
+    let x = x.dense_view();
+    let y = self.dense_view_mut();
     unsafe { cblas_sgemv(
         CBLAS_LAYOUT_CblasColMajor,
         CBLAS_TRANSPOSE_CblasNoTrans,
@@ -40,9 +40,9 @@ impl VectorInPlaceOps<f32> for Rearray<f32> {
     assert_eq!(a.size()[0], x.size()[0]);
     assert_eq!(a.size()[1], self.size()[0]);
     assert_eq!(a.stride()[0], 1);
-    let a = a.view();
-    let x = x.view();
-    let y = self.view_mut();
+    let a = a.dense_view();
+    let x = x.dense_view();
+    let y = self.dense_view_mut();
     unsafe { cblas_sgemv(
         CBLAS_LAYOUT_CblasColMajor,
         CBLAS_TRANSPOSE_CblasTrans,
@@ -63,9 +63,9 @@ impl VectorInPlaceOps<f64> for Rearray<f64> {
     assert_eq!(a.size()[0], self.size()[0]);
     assert_eq!(a.size()[1], x.size()[0]);
     assert_eq!(a.stride()[0], 1);
-    let a = a.view();
-    let x = x.view();
-    let y = self.view_mut();
+    let a = a.dense_view();
+    let x = x.dense_view();
+    let y = self.dense_view_mut();
     unsafe { cblas_dgemv(
         CBLAS_LAYOUT_CblasColMajor,
         CBLAS_TRANSPOSE_CblasNoTrans,
@@ -83,9 +83,9 @@ impl VectorInPlaceOps<f64> for Rearray<f64> {
     assert_eq!(a.size()[0], x.size()[0]);
     assert_eq!(a.size()[1], self.size()[0]);
     assert_eq!(a.stride()[0], 1);
-    let a = a.view();
-    let x = x.view();
-    let y = self.view_mut();
+    let a = a.dense_view();
+    let x = x.dense_view();
+    let y = self.dense_view_mut();
     unsafe { cblas_dgemv(
         CBLAS_LAYOUT_CblasColMajor,
         CBLAS_TRANSPOSE_CblasTrans,
@@ -117,9 +117,9 @@ impl MatrixInPlaceOps<f32> for Rearray<f32> {
     assert_eq!(a.stride()[0], 1);
     assert_eq!(b.stride()[0], 1);
     assert_eq!(self.stride()[0], 1);
-    let a = a.view();
-    let b = b.view();
-    let y = self.view_mut();
+    let a = a.dense_view();
+    let b = b.dense_view();
+    let y = self.dense_view_mut();
     unsafe { cblas_sgemm(
         CBLAS_LAYOUT_CblasColMajor,
         CBLAS_TRANSPOSE_CblasNoTrans,
@@ -155,9 +155,9 @@ impl MatrixInPlaceOps<f64> for Rearray<f64> {
     assert_eq!(a.stride()[0], 1);
     assert_eq!(b.stride()[0], 1);
     assert_eq!(self.stride()[0], 1);
-    let a = a.view();
-    let b = b.view();
-    let y = self.view_mut();
+    let a = a.dense_view();
+    let b = b.dense_view();
+    let y = self.dense_view_mut();
     unsafe { cblas_dgemm(
         CBLAS_LAYOUT_CblasColMajor,
         CBLAS_TRANSPOSE_CblasNoTrans,

@@ -12,6 +12,24 @@ use std::rc::{Rc};
 
 pub mod linalg;
 
+pub trait Layout {}
+
+pub enum Dense {}
+
+impl Layout for Dense {}
+
+pub trait View<'a, L: Layout> {
+  type V;
+
+  fn view(&'a self) -> Self::V;
+}
+
+pub trait ViewMut<'a, L: Layout> {
+  type VM;
+
+  fn view_mut(&'a mut self) -> Self::VM;
+}
+
 #[derive(Clone)]
 enum RearrayRepr<T: Copy + 'static> {
   Dense(Rc<DenseRearray<T>>),
@@ -114,6 +132,68 @@ impl<T> DenseRearray<T> where T: Copy + 'static {
   }
 }
 
+pub struct DenseRearrayView<'a, T> where T: Copy + 'static {
+  size:     IndexNd,
+  offset:   IndexNd,
+  stride:   IndexNd,
+  mem:      Ref<'a, HeapMem<T>>,
+}
+
+impl<'a, T> DenseRearrayView<'a, T> where T: Copy + 'static {
+  pub fn flat_size(&self) -> usize {
+    self.size.flat_len()
+  }
+
+  pub fn size(&self) -> &IndexNd {
+    &self.size
+  }
+
+  pub fn stride(&self) -> &IndexNd {
+    &self.stride
+  }
+
+  pub fn is_packed(&self) -> bool {
+    self.size.is_packed(&self.stride) && self.offset.is_zero()
+  }
+
+  pub fn as_ptr(&self) -> *const T {
+    (&*self.mem).as_ptr()
+  }
+}
+
+pub struct DenseRearrayViewMut<'a, T> where T: Copy + 'static {
+  size:     IndexNd,
+  offset:   IndexNd,
+  stride:   IndexNd,
+  mem:      &'a mut HeapMem<T>,
+}
+
+impl<'a, T> DenseRearrayViewMut<'a, T> where T: Copy + 'static {
+  pub fn flat_size(&self) -> usize {
+    self.size.flat_len()
+  }
+
+  pub fn size(&self) -> &IndexNd {
+    &self.size
+  }
+
+  pub fn stride(&self) -> &IndexNd {
+    &self.stride
+  }
+
+  pub fn is_packed(&self) -> bool {
+    self.size.is_packed(&self.stride) && self.offset.is_zero()
+  }
+
+  pub fn as_ptr(&self) -> *const T {
+    (&*self.mem).as_ptr()
+  }
+
+  pub fn as_ptr_mut(&self) -> *mut T {
+    (&*self.mem).as_ptr_mut()
+  }
+}
+
 #[derive(Clone, Copy)]
 /*pub enum Scalar<T: Copy + 'static> {*/
 pub enum Scalar {
@@ -157,7 +237,19 @@ impl<T> Rearray<T> where T: Copy + 'static {
 }
 
 impl<T> Rearray<T> where T: ZeroBits + 'static {
-  pub fn view<'a>(&'a self) -> RearrayView<'a, T> {
+  pub fn dense_view<'a>(&'a self) -> DenseRearrayView<'a, T> {
+    <Rearray<T> as View<'a, Dense>>::view(self)
+  }
+
+  pub fn dense_view_mut<'a>(&'a mut self) -> DenseRearrayViewMut<'a, T> {
+    <Rearray<T> as ViewMut<'a, Dense>>::view_mut(self)
+  }
+}
+
+impl<'a, T> View<'a, Dense> for Rearray<T> where T: ZeroBits + 'static {
+  type V = DenseRearrayView<'a, T>;
+
+  fn view(&'a self) -> DenseRearrayView<'a, T> {
     let is_dense_orig = {
       let repr = self.repr.try_borrow().unwrap_or_else(|_| panic!("bug"));
       match &*repr {
@@ -183,15 +275,19 @@ impl<T> Rearray<T> where T: ZeroBits + 'static {
       &RearrayRepr::Dense(ref dense) => &dense.mem,
       _ => unreachable!(),
     });
-    RearrayView{
+    DenseRearrayView{
       size,
       offset,
       stride,
       mem,
     }
   }
+}
 
-  pub fn view_mut<'a>(&'a mut self) -> RearrayViewMut<'a, T> {
+impl<'a, T> ViewMut<'a, Dense> for Rearray<T> where T: ZeroBits + 'static {
+  type VM = DenseRearrayViewMut<'a, T>;
+
+  fn view_mut(&'a mut self) -> DenseRearrayViewMut<'a, T> {
     let repr = self.repr.get_mut();
     repr.densify();
     match repr {
@@ -200,7 +296,7 @@ impl<T> Rearray<T> where T: ZeroBits + 'static {
         let offset = dense.offset.clone();
         let stride = dense.stride.clone();
         let owned_dense = Rc::make_mut(dense);
-        RearrayViewMut{
+        DenseRearrayViewMut{
           size,
           offset,
           stride,
@@ -209,63 +305,5 @@ impl<T> Rearray<T> where T: ZeroBits + 'static {
       }
       _ => unreachable!(),
     }
-  }
-}
-
-pub struct RearrayView<'a, T> where T: Copy + 'static {
-  size:     IndexNd,
-  offset:   IndexNd,
-  stride:   IndexNd,
-  mem:      Ref<'a, HeapMem<T>>,
-}
-
-impl<'a, T> RearrayView<'a, T> where T: Copy + 'static {
-  pub fn flat_size(&self) -> usize {
-    self.size.flat_len()
-  }
-
-  pub fn size(&self) -> &IndexNd {
-    &self.size
-  }
-
-  pub fn stride(&self) -> &IndexNd {
-    &self.stride
-  }
-
-  pub fn is_packed(&self) -> bool {
-    self.size.is_packed(&self.stride) && self.offset.is_zero()
-  }
-
-  pub fn as_ptr(&self) -> *const T {
-    (&*self.mem).as_ptr()
-  }
-}
-
-pub struct RearrayViewMut<'a, T> where T: Copy + 'static {
-  size:     IndexNd,
-  offset:   IndexNd,
-  stride:   IndexNd,
-  mem:      &'a mut HeapMem<T>,
-}
-
-impl<'a, T> RearrayViewMut<'a, T> where T: Copy + 'static {
-  pub fn flat_size(&self) -> usize {
-    self.size.flat_len()
-  }
-
-  pub fn size(&self) -> &IndexNd {
-    &self.size
-  }
-
-  pub fn stride(&self) -> &IndexNd {
-    &self.stride
-  }
-
-  pub fn is_packed(&self) -> bool {
-    self.size.is_packed(&self.stride) && self.offset.is_zero()
-  }
-
-  pub fn as_ptr_mut(&self) -> *mut T {
-    (&*self.mem).as_ptr_mut()
   }
 }
