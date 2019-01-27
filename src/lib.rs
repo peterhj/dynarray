@@ -14,22 +14,22 @@ pub mod linalg;
 
 #[derive(Clone)]
 enum RearrayRepr<T: Copy + 'static> {
-  Dense(Rc<DenseRearrayRepr<T>>),
-  Mini(IndexNd, MiniRearrayRepr<T>),
+  Dense(Rc<DenseRearray<T>>),
+  ScalarRep(IndexNd, Scalar),
 }
 
 impl<T> RearrayRepr<T> where T: Copy + 'static {
   fn size(&self) -> &IndexNd {
     match self {
       &RearrayRepr::Dense(ref dense) => &dense.size,
-      &RearrayRepr::Mini(ref size, _) => size,
+      &RearrayRepr::ScalarRep(ref size, _) => size,
     }
   }
 
   fn stride(&self) -> IndexNd {
     match self {
       &RearrayRepr::Dense(ref dense) => dense.stride.clone(),
-      &RearrayRepr::Mini(ref size, _) => size.to_packed_stride(),
+      &RearrayRepr::ScalarRep(ref size, _) => size.to_packed_stride(),
     }
   }
 
@@ -38,7 +38,7 @@ impl<T> RearrayRepr<T> where T: Copy + 'static {
       &RearrayRepr::Dense(ref dense) => {
         dense.size.is_packed(&dense.stride) && dense.offset.is_zero()
       }
-      &RearrayRepr::Mini(..) => true,
+      &RearrayRepr::ScalarRep(..) => true,
     }
   }
 }
@@ -47,16 +47,10 @@ impl<T> RearrayRepr<T> where T: ZeroBits + 'static {
   fn densify(&mut self) {
     match self {
       &mut RearrayRepr::Dense(_) => {}
-      &mut RearrayRepr::Mini(ref size, ref mini) => {
-        let new_dense = match mini {
-          &MiniRearrayRepr::Zeros => {
-            DenseRearrayRepr::zeros(size.clone())
-          }
-          &MiniRearrayRepr::Constants(_c) => {
-            // TODO
-            // FIXME: fill with `c`.
-            //let mut new_dense = unsafe { DenseRearrayRepr::<T>::alloc(size.clone()) };
-            unimplemented!();
+      &mut RearrayRepr::ScalarRep(ref size, ref scalar) => {
+        let new_dense = match scalar {
+          &Scalar::Zero => {
+            DenseRearray::zeros(size.clone())
           }
         };
         *self = RearrayRepr::Dense(Rc::new(new_dense));
@@ -65,21 +59,21 @@ impl<T> RearrayRepr<T> where T: ZeroBits + 'static {
   }
 }
 
-pub struct DenseRearrayRepr<T: Copy + 'static> {
+pub struct DenseRearray<T: Copy + 'static> {
   size:     IndexNd,
   offset:   IndexNd,
   stride:   IndexNd,
   mem:      HeapMem<T>,
 }
 
-impl<T> Clone for DenseRearrayRepr<T> where T: Copy + 'static {
-  fn clone(&self) -> DenseRearrayRepr<T> {
+impl<T> Clone for DenseRearray<T> where T: Copy + 'static {
+  fn clone(&self) -> DenseRearray<T> {
     // FIXME: preserve layout.
     let mut new_mem = unsafe { HeapMem::alloc(self.size.flat_len()) };
     new_mem.as_slice_mut().copy_from_slice(self.mem.as_slice());
     let offset = IndexNd::zero(self.size.dim());
     let stride = self.size.to_packed_stride();
-    DenseRearrayRepr{
+    DenseRearray{
       size: self.size.clone(),
       offset,
       stride,
@@ -88,12 +82,12 @@ impl<T> Clone for DenseRearrayRepr<T> where T: Copy + 'static {
   }
 }
 
-impl<T> DenseRearrayRepr<T> where T: ZeroBits + 'static {
-  pub fn zeros(size: IndexNd) -> DenseRearrayRepr<T> {
+impl<T> DenseRearray<T> where T: ZeroBits + 'static {
+  pub fn zeros(size: IndexNd) -> DenseRearray<T> {
     let mem = HeapMem::zeros(size.flat_len());
     let offset = IndexNd::zero(size.dim());
     let stride = size.to_packed_stride();
-    DenseRearrayRepr{
+    DenseRearray{
       size,
       offset,
       stride,
@@ -102,12 +96,12 @@ impl<T> DenseRearrayRepr<T> where T: ZeroBits + 'static {
   }
 }
 
-impl<T> DenseRearrayRepr<T> where T: Copy + 'static {
-  pub unsafe fn alloc(size: IndexNd) -> DenseRearrayRepr<T> {
+impl<T> DenseRearray<T> where T: Copy + 'static {
+  pub unsafe fn alloc(size: IndexNd) -> DenseRearray<T> {
     let mem = HeapMem::alloc(size.flat_len());
     let offset = IndexNd::zero(size.dim());
     let stride = size.to_packed_stride();
-    DenseRearrayRepr{
+    DenseRearray{
       size,
       offset,
       stride,
@@ -115,15 +109,15 @@ impl<T> DenseRearrayRepr<T> where T: Copy + 'static {
     }
   }
 
-  pub fn copy_from(&mut self, src: &DenseRearrayRepr<T>) {
+  pub fn copy_from(&mut self, src: &DenseRearray<T>) {
     self.mem.as_slice_mut().copy_from_slice(src.mem.as_slice());
   }
 }
 
 #[derive(Clone, Copy)]
-pub enum MiniRearrayRepr<T: Copy + 'static> {
-  Zeros,
-  Constants(T),
+/*pub enum Scalar<T: Copy + 'static> {*/
+pub enum Scalar {
+  Zero,
 }
 
 pub struct Rearray<T: Copy + 'static> {
@@ -142,7 +136,7 @@ impl<T> Clone for Rearray<T> where T: Copy + 'static {
 impl<T> Rearray<T> where T: Copy + 'static {
   pub fn zeros(size: IndexNd) -> Rearray<T> {
     Rearray{
-      repr: RefCell::new(RearrayRepr::Mini(size, MiniRearrayRepr::Zeros)),
+      repr: RefCell::new(RearrayRepr::ScalarRep(size, Scalar::Zero)),
     }
   }
 
@@ -213,7 +207,7 @@ impl<T> Rearray<T> where T: ZeroBits + 'static {
           mem:  &mut owned_dense.mem,
         }
       }
-      _ => unimplemented!(),
+      _ => unreachable!(),
     }
   }
 }
